@@ -1,0 +1,22 @@
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+
+# Conda environment
+llama-cpu/
+
+# llama.cpp build artifacts
+llm/llama.cpp/build/
+llm/llama.cpp/build-*/
+llm/llama.cpp/.cache/
+
+# Generated models / large checkpoints
+llm/llama.cpp/models/*
+!llm/llama.cpp/models/.gitkeep
+
+# Logs and temp files
+*.log
+*.tmp
+
+# OS files
+.DS_Store
