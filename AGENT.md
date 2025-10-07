@@ -146,7 +146,7 @@ After activating the `llama-cpu` environment you can launch a quick test without
 python run_cpu_llm.py --prompt "Say hello in one sentence." --n-predict 32
 ```
 
-By default the helper wraps `build/bin/llama-cli` to avoid hardware-specific wheels that can crash with `Illegal instruction`. Key options:
+By default the helper wraps `build/bin/llama-cli` to avoid hardware-specific wheels that can crash with `Illegal instruction`. If you omit `--n-predict`, the script now lets the model run up to the (default) context window, which is typically enough for “long” answers without hanging. Key options:
 - `--threads`, `--batch-size`, `--ctx-size`, `--model` mirror the CLI flags.
 - `--prompt-file` reads a UTF-8 file instead of inline text.
 - `--use-python` opts into the Python `llama_cpp` bindings (requires `pip install llama-cpp-python==0.2.90`).

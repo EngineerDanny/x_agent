@@ -25,7 +25,12 @@ def build_parser() -> argparse.ArgumentParser:
     prompt_group.add_argument("--prompt", help="Inline prompt text.")
     prompt_group.add_argument("--prompt-file", type=Path, help="Read prompt from file.")
 
-    parser.add_argument("--n-predict", type=int, default=128, help="Tokens to generate (default 128).")
+    parser.add_argument(
+        "--n-predict",
+        type=int,
+        default=None,
+        help="Limit tokens generated (omit to let the model stop naturally).",
+    )
     parser.add_argument("--threads", type=int, help="CPU threads (default: SLURM_CPUS_PER_TASK or os.cpu_count).")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size (default 64).")
     parser.add_argument("--ctx-size", type=int, default=4096, help="Context window (default 4096).")
@@ -95,12 +100,14 @@ def python_backend(args: argparse.Namespace, model_path: Path, threads: int) -> 
     )
     prompt_text = read_prompt(args)
 
-    completion = llm(
-        prompt=prompt_text,
-        max_tokens=args.n_predict,
-        temperature=args.temperature,
-        top_p=args.top_p,
-    )
+    llm_kwargs = {
+        "prompt": prompt_text,
+        "temperature": args.temperature,
+        "top_p": args.top_p,
+        "max_tokens": args.n_predict if args.n_predict is not None else max(1, args.ctx_size - 1),
+    }
+
+    completion = llm(**llm_kwargs)
     text = completion["choices"][0]["text"]
     print(text.strip())
 
@@ -122,13 +129,14 @@ def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, thr
         str(args.batch_size),
         "--ctx-size",
         str(args.ctx_size),
-        "--n-predict",
-        str(args.n_predict),
         "--no-conversation",
         "--simple-io",
         "--prompt",
         prompt_text,
     ]
+
+    predict_limit = args.n_predict if args.n_predict is not None else max(1, args.ctx_size - 1)
+    cmd.extend(["--n-predict", str(predict_limit)])
 
     if args.extra_args:
         cmd.append("--")
@@ -146,6 +154,7 @@ def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, thr
         cwd=llama_dir,
         text=True,
         capture_output=not args.verbose,
+        input="",
         env=env,
     )
 
