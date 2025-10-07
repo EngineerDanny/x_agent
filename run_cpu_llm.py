@@ -134,6 +134,11 @@ def python_backend(args: argparse.Namespace, model_path: Path, threads: int) -> 
 
 def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, threads: int) -> int:
     prompt_text = read_prompt(args)
+    prompt_lines = {
+        line.strip()
+        for line in prompt_text.splitlines()
+        if line.strip()
+    }
 
     llama_cli = llama_dir / "build" / "bin" / "llama-cli"
     if not llama_cli.is_file():
@@ -218,7 +223,7 @@ def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, thr
                     stripped = line.strip()
                     if not printed_any and stripped == "":
                         continue
-                    if stripped == prompt_text.strip():
+                    if stripped in prompt_lines:
                         continue
                     if any(stripped.startswith(prefix) for prefix in debug_prefixes):
                         stop_print = True
@@ -227,7 +232,7 @@ def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, thr
                     printed_any = True
             if printing and not stop_print and buffer:
                 stripped = buffer.strip()
-                if stripped and stripped != prompt_text.strip() and not any(
+                if stripped and stripped not in prompt_lines and stripped != prompt_text.strip() and not any(
                     stripped.startswith(prefix) for prefix in debug_prefixes
                 ):
                     print(buffer, end="", flush=True)
@@ -279,7 +284,7 @@ def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, thr
             continue
         if set(stripped) == {"."}:
             continue
-        if stripped == prompt_text.strip():
+        if stripped == prompt_text.strip() or stripped in prompt_lines:
             continue
         if any(stripped.startswith(prefix) for prefix in debug_prefixes):
             continue
