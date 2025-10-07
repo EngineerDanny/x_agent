@@ -183,15 +183,60 @@ def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, thr
         if not process.stdout:
             return process.wait()
         try:
+            printing = False
+            printed_any = False
+            stop_print = False
+            buffer = ""
+            debug_prefixes = (
+                "build:",
+                "main:",
+                "llama_model_loader:",
+                "print_info:",
+                "load:",
+                "llama_context:",
+                "llama_kv_cache:",
+                "common_init_from_params:",
+                "system_info:",
+                "sampler",
+                "generate:",
+                "llama_perf",
+                "llama_memory",
+            )
             while True:
                 chunk = process.stdout.read(1024)
                 if chunk == "":
                     break
-                if chunk:
-                    print(chunk, end="", flush=True)
+                buffer += chunk
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    if not printing:
+                        if "generate:" in line:
+                            printing = True
+                        continue
+                    if stop_print:
+                        continue
+                    stripped = line.strip()
+                    if not printed_any and stripped == "":
+                        continue
+                    if stripped == prompt_text.strip():
+                        continue
+                    if any(stripped.startswith(prefix) for prefix in debug_prefixes):
+                        stop_print = True
+                        continue
+                    print(line, end="\n", flush=True)
+                    printed_any = True
+            if printing and not stop_print and buffer:
+                stripped = buffer.strip()
+                if stripped and stripped != prompt_text.strip() and not any(
+                    stripped.startswith(prefix) for prefix in debug_prefixes
+                ):
+                    print(buffer, end="", flush=True)
+                    printed_any = True
         finally:
             process.stdout.close()
         ret = process.wait()
+        if printed_any:
+            print()
         return ret
 
     result = subprocess.run(
