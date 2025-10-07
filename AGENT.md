@@ -4,22 +4,19 @@ This guide documents how to stand up a local large-language-model inference stac
 
 ## 1. Request an interactive CPU node
 
-Use Slurm to land on an idle CPU node. Adjust time, memory, or cores as needed for your workload.
+Run *all* setup and inference commands on a compute node, not the login node. The quickest way is to launch the provided helper, which wraps `srun`:
 
 ```bash
-srun \
-  --partition=core \
-  --nodes=1 \
-  --cpus-per-task=32 \
-  --mem=180G \
-  --time=04:00:00 \
-  --pty bash
+cd /projects/genomic-ml/da2343/x_agent
+./launch_cpu_session.sh
 ```
 
+The helper defaults to 32 CPUs and 180 GB RAM; override `SRUN_CPUS`, `SRUN_MEM`, `SRUN_TIME`, or `SRUN_PARTITION` before invoking if you need different resources. If you prefer to call `srun` manually, reuse the template inside the script but still request an interactive shell before proceeding.
+
 Tips:
-- `--cpus-per-task` controls the threading budget for inference; 24–48 threads work well for 7B–13B models.
-- Increase `--mem` if you plan to load larger quantized checkpoints (≈80 GB for 34B Q4_K).
-- For batch runs, convert this to an `sbatch` script (see §5).
+- Match `--cpus-per-task` (or `SRUN_CPUS`) to the thread count you intend to pass to llama.cpp or `run_cpu_llm.py`.
+- Increase `--mem` for larger quantized checkpoints (e.g., ≥60 GB for 34B Q4_K models).
+- For unattended runs, convert the helper to an `sbatch` submission as shown in §6.
 
 ## 2. Prepare a software environment
 
@@ -56,7 +53,7 @@ Pick a GGUF model that fits CPU inference. Popular options:
 - `TheBloke/Mistral-7B-Instruct-v0.2-GGUF`
 - `bartowski/Qwen2-7B-Instruct-GGUF`
 
-Download with the Hugging Face CLI (requires a token for gated repos):
+Download with the Hugging Face CLI (requires a token for gated repos). Always issue the download command from within the compute node shell you just opened:
 
 ```bash
 hf download TheBloke/Mistral-7B-Instruct-v0.2-GGUF \
@@ -140,7 +137,7 @@ With these steps you can provision, run, and automate CPU-only inference for qua
 
 ## 9. Convenience helper (`run_cpu_llm.py`)
 
-After activating the `llama-cpu` environment you can launch a quick test without wrestling with the full CLI:
+After activating the `llama-cpu` environment *on the compute node*, you can launch a quick test without wrestling with the full CLI:
 
 ```bash
 python run_cpu_llm.py --prompt "Say hello in one sentence." --n-predict 32
@@ -150,3 +147,15 @@ By default the helper wraps `build/bin/llama-cli` to avoid hardware-specific whe
 - `--threads`, `--batch-size`, `--ctx-size`, `--model` mirror the CLI flags.
 - `--prompt-file` reads a UTF-8 file instead of inline text.
 - `--use-python` opts into the Python `llama_cpp` bindings (requires `pip install llama-cpp-python==0.2.90`).
+
+### 10. Reusable streaming demo (`run_deepseek_prompt.sh`)
+
+For frequent tests, the repo ships with a small wrapper that reads a prompt template from `prompts/boiling_water.json` and runs the UnsLoTH DeepSeek 8B GGUF. Invoke it only after jumping onto a compute node:
+
+```bash
+cd /projects/genomic-ml/da2343
+./x_agent/run_deepseek_prompt.sh              # batch output
+./x_agent/run_deepseek_prompt.sh --stream     # streaming tokens only
+```
+
+Override `THREADS`, `PREDICT`, or append additional flags (e.g., `--model` to swap checkpoints) as needed. The script simply forwards arguments to `run_cpu_llm.py`.
