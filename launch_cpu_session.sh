@@ -20,8 +20,8 @@ fi
 
 # Allow resource tweaks via environment variables.
 SRUN_PARTITION="${SRUN_PARTITION:-core}"
-SRUN_CPUS="${SRUN_CPUS:-32}"
-SRUN_MEM="${SRUN_MEM:-180G}"
+SRUN_CPUS="${SRUN_CPUS:-16}"
+SRUN_MEM="${SRUN_MEM:-20G}"
 SRUN_TIME="${SRUN_TIME:-04:00:00}"
 
 echo "Requesting compute node (partition=${SRUN_PARTITION}, cpus=${SRUN_CPUS}, mem=${SRUN_MEM}, time=${SRUN_TIME})..."

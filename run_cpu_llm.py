@@ -46,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=argparse.REMAINDER,
         help="Extra flags passed to llama-cli after '--'.",
     )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream tokens to stdout as they generate (CLI backend; python backend uses streaming iterator).",
+    )
     parser.add_argument("--temperature", type=float, default=0.8, help="Temperature (python backend only).")
     parser.add_argument("--top-p", type=float, default=0.95, help="Top-p (python backend only).")
     parser.add_argument("--seed", type=int, help="Random seed (python backend only).")
@@ -100,14 +105,29 @@ def python_backend(args: argparse.Namespace, model_path: Path, threads: int) -> 
     )
     prompt_text = read_prompt(args)
 
-    llm_kwargs = {
-        "prompt": prompt_text,
-        "temperature": args.temperature,
-        "top_p": args.top_p,
-        "max_tokens": args.n_predict if args.n_predict is not None else max(1, args.ctx_size - 1),
-    }
+    max_tokens = args.n_predict if args.n_predict is not None else max(1, args.ctx_size - 1)
 
-    completion = llm(**llm_kwargs)
+    if args.stream:
+        stream = llm(
+            prompt=prompt_text,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        for chunk in stream:
+            piece = chunk["choices"][0]["text"]
+            if piece:
+                print(piece, end="", flush=True)
+        print()
+        return
+
+    completion = llm(
+        prompt=prompt_text,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        max_tokens=max_tokens,
+    )
     text = completion["choices"][0]["text"]
     print(text.strip())
 
@@ -149,12 +169,37 @@ def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, thr
     env["OMP_NUM_THREADS"] = str(threads)
     env.setdefault("LLAMA_LOG_LEVEL", "error")
 
+    if args.stream:
+        process = subprocess.Popen(
+            cmd,
+            cwd=llama_dir,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            bufsize=1,
+        )
+        if not process.stdout:
+            return process.wait()
+        try:
+            while True:
+                chunk = process.stdout.read(1024)
+                if chunk == "":
+                    break
+                if chunk:
+                    print(chunk, end="", flush=True)
+        finally:
+            process.stdout.close()
+        ret = process.wait()
+        return ret
+
     result = subprocess.run(
         cmd,
         cwd=llama_dir,
         text=True,
         capture_output=not args.verbose,
-        input="",
+        stdin=subprocess.DEVNULL,
         env=env,
     )
 
