@@ -268,6 +268,12 @@ def summarize_with_llm(model: pathlib.Path, threads: int, prompt: str) -> str:
             tmp_path,
             "--n-predict",
             str(SUMMARY_TOKENS),
+            "--extra-args",
+            "--",
+            "--temp",
+            "0.2",
+            "--top-p",
+            "0.9",
         ]
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         return result.stdout.strip()
