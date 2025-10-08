@@ -159,3 +159,21 @@ cd /projects/genomic-ml/da2343
 ```
 
 Override `THREADS`, `PREDICT`, or append additional flags (e.g., `--model` to swap checkpoints) as needed. The script simply forwards arguments to `run_cpu_llm.py`.
+
+### 11. Fetch Hacker News headlines (`scripts/fetch_hn_top.py`)
+
+To grab the current top Hacker News stories and avoid reposting the same link, run:
+
+```bash
+srun --partition=core --cpus-per-task=1 --mem=2G --time=00:05:00 \
+  python /projects/genomic-ml/da2343/x_agent/scripts/fetch_hn_top.py \
+    --limit 10 --score-min 200
+```
+
+The script hits the free Algolia API (`https://hn.algolia.com/api/v1/search?tags=front_page`) and prints a two-line summary for the next unseen story in your feed:
+```
+<title> — (<points> points) — by <author>
+<url>
+```
+
+It maintains a cache of posted story IDs at `/projects/genomic-ml/da2343/x_agent/cache/hn_posted.json` (override with `HN_POSTED_CACHE=/path/foo.json` if you want a different location). Use `--reset-cache` to clear, or tweak `--limit`/`--score-min` per your needs. Because it makes an external HTTP request, always launch it from a compute node (`srun` or inside an existing interactive session). Adjust polling frequency responsibly if you automate it.
