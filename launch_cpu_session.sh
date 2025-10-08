@@ -56,6 +56,7 @@ srun \
     cd \"${SCRIPT_DIR}\"
     echo 'Conda environment '${CONDA_ENV_NAME}' activated on node:' \"\$(hostname)\"
     echo 'Run your inference, e.g.:'
-    echo '  python run_cpu_llm.py --prompt \"Say hello in one sentence.\" --n-predict 32'
+    echo '  python scripts/news_summarize.py --limit 10 --dry-run'
+    echo '  python scripts/news_summarize.py --country us --category technology --tweet'
     exec bash
   "

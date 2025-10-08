@@ -69,11 +69,11 @@ def _fingerprint_summary(summary: str) -> str:
     return hashlib.sha256(summary.strip().encode("utf-8")).hexdigest()
 
 
-def tweet_summary(summary: str, url: str, seen: set[str], force: bool = False) -> set[str]:
-    """Post summary+URL to Twitter if not already shared."""
+def tweet_summary(summary: str, seen: set[str]) -> set[str]:
+    """Post summary text to Twitter if we haven't published it yet."""
     unique_id = _fingerprint_summary(summary)
-    if unique_id in seen and not force:
-        print("Summary already tweeted; skipping (use --tweet-force to override).", file=sys.stderr)
+    if unique_id in seen:
+        print("Summary already tweeted; skipping.", file=sys.stderr)
         return seen
 
     required_env = [
@@ -122,25 +122,13 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         "--country",
         type=str,
         default=DEFAULT_COUNTRY,
-        help="2-letter country code for NewsAPI filtering (omit when using --sources)",
+        help="2-letter country code for NewsAPI filtering (e.g., us, gb, ca)",
     )
     parser.add_argument(
         "--category",
         type=str,
         default=None,
         help="Optional NewsAPI category filter (business, entertainment, health, science, sports, technology)",
-    )
-    parser.add_argument(
-        "--sources",
-        type=str,
-        default=None,
-        help="Comma-separated NewsAPI source identifiers (cannot be combined with --country/--category)",
-    )
-    parser.add_argument(
-        "--query",
-        type=str,
-        default=None,
-        help="Optional keyword filter passed via NewsAPI's 'q' parameter",
     )
     parser.add_argument(
         "--cache",
@@ -158,11 +146,6 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument("--reset-cache", action="store_true", help="Clear cache before processing")
     parser.add_argument("--dry-run", action="store_true", help="Skip summarization; just show selected story")
     parser.add_argument("--tweet", action="store_true", help="Post the summary to Twitter")
-    parser.add_argument(
-        "--tweet-force",
-        action="store_true",
-        help="Post to Twitter even if this summary has been seen before",
-    )
     return parser.parse_args(argv)
 
 
@@ -189,27 +172,17 @@ def fetch_top_headlines(
     limit: int,
     country: str | None = None,
     category: str | None = None,
-    sources: str | None = None,
-    query: str | None = None,
 ) -> list[dict]:
     """Call NewsAPI's top-headlines endpoint and return article payloads."""
     if not api_key:
         raise RuntimeError("NEWS_API_KEY environment variable is required to call NewsAPI.org.")
 
-    if sources and (country or category):
-        raise ValueError("NewsAPI prohibits mixing sources with country or category filters.")
-
     page_size = max(1, min(limit, NEWS_API_PAGE_SIZE_MAX))
     params: dict[str, str] = {"pageSize": str(page_size)}
-    if sources:
-        params["sources"] = sources
-    else:
-        if country:
-            params["country"] = country
-        if category:
-            params["category"] = category
-    if query:
-        params["q"] = query
+    if country:
+        params["country"] = country
+    if category:
+        params["category"] = category
 
     headers = {"X-Api-Key": api_key}
     response = requests.get(NEWS_API_URL, headers=headers, params=params, timeout=10)
@@ -259,10 +232,8 @@ def main(argv: List[str]) -> int:
             limit=args.limit,
             country=args.country,
             category=args.category,
-            sources=args.sources,
-            query=args.query,
         )
-    except (requests.RequestException, RuntimeError, ValueError) as exc:
+    except (requests.RequestException, RuntimeError) as exc:
         print(f"Error: failed to retrieve headlines ({exc})", file=sys.stderr)
         return 1
 
@@ -319,7 +290,7 @@ def main(argv: List[str]) -> int:
             continue
 
         summary_token = _fingerprint_summary(summary)
-        if summary_token in tweeted_ids and not args.tweet_force:
+        if summary_token in tweeted_ids:
             print("Skipping: summary text already used in a previous tweet.", file=sys.stderr)
             seen_ids.add(unique_key)
             continue
@@ -327,7 +298,7 @@ def main(argv: List[str]) -> int:
         print("\nSummary:")
         print(summary)
         if args.tweet:
-            tweeted_ids = tweet_summary(summary, url, tweeted_ids, force=args.tweet_force)
+            tweeted_ids = tweet_summary(summary, tweeted_ids)
         elif not args.dry_run:
             tweeted_ids.add(summary_token)
             _save_tweeted(TWEET_CACHE, tweeted_ids)
