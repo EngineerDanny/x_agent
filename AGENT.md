@@ -160,32 +160,26 @@ cd /projects/genomic-ml/da2343
 
 Override `THREADS`, `PREDICT`, or append additional flags (e.g., `--model` to swap checkpoints) as needed. The script simply forwards arguments to `run_cpu_llm.py`.
 
-### 11. Fetch Hacker News headlines (`scripts/fetch_hn_top.py`)
+### 11. Fetch NewsAPI headlines (`scripts/fetch_news_top.py`)
 
-To grab the current top Hacker News stories and avoid reposting the same link, run:
+To pull the latest top headlines from NewsAPI.org and avoid reposting the same article, run:
 
 ```bash
 srun --partition=core --cpus-per-task=1 --mem=2G --time=00:05:00 \
-  python /projects/genomic-ml/da2343/x_agent/scripts/fetch_hn_top.py \
-    --limit 10 --score-min 200
+  python /projects/genomic-ml/da2343/x_agent/scripts/fetch_news_top.py \
+    --limit 10 --country us --category technology
 ```
 
-The script hits the free Algolia API (`https://hn.algolia.com/api/v1/search?tags=front_page`) and prints a two-line summary for the next unseen story in your feed:
-```
-<title> — (<points> points) — by <author>
-<url>
-```
+The script calls `https://newsapi.org/v2/top-headlines` using your `NEWS_API_KEY`, prints a two-line summary for the next unseen article, and skips anything already logged in `/projects/genomic-ml/da2343/x_agent/cache/news_posted.json`. Override the cache path with `NEWS_POSTED_CACHE=/path/foo.json`, clear history via `--reset-cache`, and combine filters such as `--sources wired` or `--query AI` as needed. Because it makes an external HTTP request, launch it from a compute node (`srun` or an interactive session). Respect NewsAPI rate limits if you automate polling.
 
-It maintains a cache of posted story IDs at `/projects/genomic-ml/da2343/x_agent/cache/hn_posted.json` (override with `HN_POSTED_CACHE=/path/foo.json` if you want a different location). Use `--reset-cache` to clear, or tweak `--limit`/`--score-min` per your needs. Because it makes an external HTTP request, always launch it from a compute node (`srun` or inside an existing interactive session). Adjust polling frequency responsibly if you automate it.
+### 12. Full News summarizer (`scripts/news_summarize.py`)
 
-### 12. Full HN summarizer (`scripts/hn_summarize.py`)
-
-For an end-to-end workflow that fetches a fresh HN story, grabs the linked article, and summarizes it with the local GGUF model:
+For an end-to-end workflow that fetches a fresh NewsAPI headline, retrieves the linked article, and summarizes it with the local GGUF model:
 
 ```bash
 srun --partition=core --cpus-per-task=16 --mem=20G --time=00:30:00 \
-  python /projects/genomic-ml/da2343/x_agent/scripts/hn_summarize.py \
-    --limit 15 --score-min 200
+  python /projects/genomic-ml/da2343/x_agent/scripts/news_summarize.py \
+    --limit 15 --country us --category business
 ```
 
-This script reuses the same cache (so you don’t repeat stories), downloads article content via `trafilatura`, and calls `run_cpu_llm.py` to generate a ≤240 character social-style blurb. Ensure `trafilatura` is installed in the `llama-cpu` environment (`pip install trafilatura`) and run it from a compute node. Add `--dry-run` to skip summarization when testing, or `--reset-cache` to start over.
+This script shares the same cache (so you don’t repeat articles), downloads article content via `trafilatura`, and calls `run_cpu_llm.py` to generate a ≤240 character social-style blurb. Ensure `trafilatura` is installed in the `llama-cpu` environment (`pip install trafilatura`) and run it from a compute node. Use `--dry-run` to skip summarization during testing or `--reset-cache` to start over from a clean slate. Enable `--tweet` if you want to post the generated summary to Twitter with the stored credentials.
