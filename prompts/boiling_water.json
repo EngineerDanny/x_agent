@@ -1,9 +1,0 @@
-You are a concise but thoughtful assistant. Work through the problem silently and return only valid JSON.
-
-Question: Give three reasons water boils at 100 °C.
-
-Respond exactly as:
-{
-  "reasoning": "<brief step-by-step explanation>",
-  "answer": "<final answer>"
-}

@@ -15,7 +15,7 @@ import requests
 
 NEWS_API_URL = "https://newsapi.org/v2/top-headlines"
 NEWS_API_PAGE_SIZE_MAX = 100
-DEFAULT_LIMIT = 10
+DEFAULT_LIMIT = 50
 DEFAULT_COUNTRY = "us"
 CACHE_ENV = "NEWS_POSTED_CACHE"
 DEFAULT_CACHE = pathlib.Path("/projects/genomic-ml/da2343/x_agent/cache/news_posted.json")
@@ -27,7 +27,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         "--limit",
         type=int,
         default=DEFAULT_LIMIT,
-        help="Number of articles to request (NewsAPI caps pageSize at 100; default: 10)",
+        help="Number of articles to request (NewsAPI caps pageSize at 100; default: 50)",
     )
     parser.add_argument(
         "--country",

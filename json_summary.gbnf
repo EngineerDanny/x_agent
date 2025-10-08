@@ -1,0 +1,10 @@
+# exactly: {"summary":"...","tweet":"..."}
+root         ::= obj ws
+obj          ::= "{" ws "\"summary\"" ws ":" ws jstring ws "," ws "\"tweet\"" ws ":" ws jstring ws "}"
+jstring      ::= "\"" chars "\""
+chars        ::= { char }
+char         ::= unescaped | escape
+unescaped    ::= [^"\\]
+escape       ::= "\\" ( ["\\/bfnrt] | "u" hex hex hex hex )
+hex          ::= [0-9a-fA-F]
+ws           ::= { " " | "\t" | "\r" | "\n" }

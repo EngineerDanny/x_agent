@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import Iterable, List
+from typing import List
 
 import requests
 import tweepy
@@ -28,9 +28,8 @@ from dotenv import load_dotenv
 
 NEWS_API_URL = "https://newsapi.org/v2/top-headlines"
 NEWS_API_PAGE_SIZE_MAX = 100  # documented hard limit for pageSize
-DEFAULT_LIMIT = 10
+DEFAULT_LIMIT = 50
 DEFAULT_COUNTRY = "us"
-DEFAULT_CACHE = pathlib.Path("/projects/genomic-ml/da2343/x_agent/cache/news_seen.json")
 
 NEWS_PROMPT_TEMPLATE = textwrap.dedent(
     """
@@ -42,6 +41,22 @@ NEWS_PROMPT_TEMPLATE = textwrap.dedent(
     - summary: one short paragraph (<=320 characters) recapping the article.
     - tweet: conversational (<=200 characters), include exactly one relevant hashtag or mention, no raw URLs.
     - Do NOT include any extra text, commentary, explanations, or Markdown outside the JSON braces.
+
+    Headline: {title}
+    URL: {url}
+
+    Article excerpt:
+    {excerpt}
+    """
+).strip()
+
+NEWS_PROMPT_RETRY_TEMPLATE = textwrap.dedent(
+    """
+    Your previous reply was not valid JSON. Respond now with **only** a single JSON object matching exactly:
+    {{"summary": "...", "tweet": "..."}}
+    - summary: concise recap (<=320 characters)
+    - tweet: conversational (<=200 characters), include exactly one hashtag or mention, no URLs
+    No prose, no introductions, no additional keys. Output must start with '{{' and end with '}}'.
 
     Headline: {title}
     URL: {url}
@@ -145,6 +160,10 @@ def tweet_summary(tweet_text: str, seen: set[str]) -> set[str]:
         access_token=os.environ["TWITTER_ACCESS_TOKEN"],
         access_token_secret=os.environ["TWITTER_ACCESS_SECRET"],
     )
+    
+    ## DEBUGGING: Print tweet text to stderr before posting
+    print(f"DEBUG: Tweet text to be posted:\n{tweet_text}\n")
+    return False  # Skip actual tweeting for debugging purposes
 
     try:
         response = client.create_tweet(text=tweet_text)
@@ -167,7 +186,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         "--limit",
         type=int,
         default=DEFAULT_LIMIT,
-        help="Number of headlines to fetch (NewsAPI caps pageSize at 100; default: 10)",
+        help="Number of headlines to fetch (NewsAPI caps pageSize at 100; default: 50)",
     )
     parser.add_argument(
         "--country",
@@ -185,8 +204,8 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--cache",
         type=pathlib.Path,
-        default=DEFAULT_CACHE,
-        help="Cache file for seen story IDs",
+        default=None,
+        help="(Deprecated) Ignored; kept for backward compatibility.",
     )
     parser.add_argument(
         "--model",
@@ -195,28 +214,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         help="Path to GGUF model for summarization",
     )
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="LLM threads (default: 16)")
-    parser.add_argument("--reset-cache", action="store_true", help="Clear cache before processing")
+    parser.add_argument("--reset-cache", action="store_true", help="(Deprecated) Ignored; kept for compatibility")
     parser.add_argument("--dry-run", action="store_true", help="Skip summarization; just show selected story")
     parser.add_argument("--tweet", action="store_true", help="Post the summary to Twitter")
     return parser.parse_args(argv)
-
-
-def load_cache(cache_path: pathlib.Path, reset: bool) -> set[str]:
-    """Load cached article IDs from disk."""
-    if reset and cache_path.exists():
-        cache_path.unlink()
-    if not cache_path.exists():
-        return set()
-    try:
-        return set(json.loads(cache_path.read_text(encoding="utf-8")))
-    except json.JSONDecodeError:
-        return set()
-
-
-def save_cache(cache_path: pathlib.Path, ids: Iterable[str]) -> None:
-    """Persist cached article IDs."""
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(sorted(set(ids))), encoding="utf-8")
 
 
 def fetch_top_headlines(
@@ -268,14 +269,14 @@ def summarize_with_llm(model: pathlib.Path, threads: int, prompt: str) -> str:
             tmp_path,
             "--n-predict",
             str(SUMMARY_TOKENS),
-            "--extra-args",
-            "--",
-            "--temp",
-            "0.2",
-            "--top-p",
-            "0.9",
+            "--temperature",
+            "0.1",
         ]
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr or exc.stdout or ''
+            raise RuntimeError(f'LLM invocation failed (exit {exc.returncode}): {stderr.strip()}') from exc
         return result.stdout.strip()
     finally:
         os.unlink(tmp_path)
@@ -295,8 +296,7 @@ def main(argv: List[str]) -> int:
         print(f"Error: failed to retrieve headlines ({exc})", file=sys.stderr)
         return 1
 
-    cached_ids = load_cache(args.cache, args.reset_cache)
-    seen_ids = set(cached_ids)
+    processed_ids: set[str] = set()
     tweeted_ids = _load_tweeted(TWEET_CACHE)
 
     for article in articles:
@@ -304,7 +304,7 @@ def main(argv: List[str]) -> int:
         title = article.get("title") or "Untitled"
         unique_key = url or hashlib.sha256(title.encode("utf-8")).hexdigest()
 
-        if unique_key in seen_ids:
+        if unique_key in processed_ids:
             continue
 
         source_name = ((article.get("source") or {}).get("name")) or ""
@@ -318,55 +318,75 @@ def main(argv: List[str]) -> int:
         print(summary_line)
 
         if args.dry_run:
-            seen_ids.add(unique_key)
-            save_cache(args.cache, seen_ids)
+            processed_ids.add(unique_key)
             return 0
 
         if not url:
             print("Skipping: article lacks a URL to summarize.", file=sys.stderr)
-            seen_ids.add(unique_key)
+            processed_ids.add(unique_key)
             continue
 
-        article_text = article.get("description") or ""
+        article_text = (article.get("description") or "").strip()
+        if not article_text:
+            content = (article.get("content") or "").strip()
+            if content:
+                article_text = content.split("…")[0].strip() or content
+        if not article_text:
+            article_text = title
         if not article_text:
             print("Skipping: article lacks a usable description.", file=sys.stderr)
-            seen_ids.add(unique_key)
+            processed_ids.add(unique_key)
             continue
-        article_text = textwrap.shorten(article_text.strip(), width=ARTICLE_CHAR_LIMIT, placeholder="")
+        article_text = textwrap.shorten(article_text, width=ARTICLE_CHAR_LIMIT, placeholder="")
 
-        prompt = NEWS_PROMPT_TEMPLATE.format(
-            title=title,
-            url=url,
-            excerpt=article_text,
-        )
-        raw_summary = summarize_with_llm(args.model, args.threads, prompt)
-        try:
-            summary, tweet_text = _parse_model_output(raw_summary)
-        except ValueError as exc:
-            print(f"Skipping: model output invalid ({exc}).", file=sys.stderr)
-            seen_ids.add(unique_key)
+        summary = tweet_text = None
+        last_error: ValueError | None = None
+        prompt_templates = [NEWS_PROMPT_TEMPLATE, NEWS_PROMPT_RETRY_TEMPLATE]
+        for template in prompt_templates:
+            prompt = template.format(title=title, url=url, excerpt=article_text)
+            try:
+                raw_summary = summarize_with_llm(args.model, args.threads, prompt)
+            except RuntimeError as exc:
+                print(f"Skipping: LLM call failed ({exc}).", file=sys.stderr)
+                summary = tweet_text = None
+                break
+            try:
+                summary, tweet_text = _parse_model_output(raw_summary)
+                break
+            except ValueError as exc:
+                last_error = exc
+                summary = tweet_text = None
+                continue
+
+        if summary is None or tweet_text is None:
+            message = f"model output invalid ({last_error})" if last_error else "failed to produce summary"
+            print(f"Skipping: {message}.", file=sys.stderr)
+            processed_ids.add(unique_key)
             continue
 
         if len(summary) < MIN_SUMMARY_LENGTH:
-            print("Skipping: summary is too short to be informative.", file=sys.stderr)
-            seen_ids.add(unique_key)
+            summary = textwrap.shorten(article_text, width=MAX_SUMMARY_LENGTH, placeholder="")
+            if len(summary) < MIN_SUMMARY_LENGTH:
+                summary = textwrap.shorten(summary_line, width=MAX_SUMMARY_LENGTH, placeholder="")
+        if len(summary) < MIN_SUMMARY_LENGTH:
+            print("Skipping: summary is too short to be informative even after fallback.", file=sys.stderr)
+            processed_ids.add(unique_key)
             continue
 
         if len(summary) > MAX_SUMMARY_LENGTH:
             summary = summary[:MAX_SUMMARY_LENGTH].rstrip()
 
         if len(tweet_text) > MAX_TWEET_LENGTH:
-            print(
-                f"Skipping: tweet text exceeds {MAX_TWEET_LENGTH} characters (got {len(tweet_text)}).",
-                file=sys.stderr,
-            )
-            seen_ids.add(unique_key)
-            continue
+            tweet_text = textwrap.shorten(tweet_text, width=MAX_TWEET_LENGTH, placeholder="")
+        if not tweet_text:
+            tweet_text = textwrap.shorten(summary, width=MAX_TWEET_LENGTH, placeholder="") or "Breaking news update #news"
+        if len(tweet_text) > MAX_TWEET_LENGTH:
+            tweet_text = tweet_text[:MAX_TWEET_LENGTH].rstrip()
 
         tweet_hash = _fingerprint_summary(tweet_text)
         if tweet_hash in tweeted_ids:
             print("Skipping: summary text already used in a previous tweet.", file=sys.stderr)
-            seen_ids.add(unique_key)
+            processed_ids.add(unique_key)
             continue
 
         print("\nSummary:")
@@ -379,11 +399,9 @@ def main(argv: List[str]) -> int:
             tweeted_ids.add(tweet_hash)
             _save_tweeted(TWEET_CACHE, tweeted_ids)
 
-        seen_ids.add(unique_key)
-        save_cache(args.cache, seen_ids)
+        processed_ids.add(unique_key)
         return 0
 
-    save_cache(args.cache, seen_ids)
     print("No unseen stories produced a usable summary.", file=sys.stderr)
     return 1
 

@@ -54,6 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temperature", type=float, default=0.8, help="Temperature (python backend only).")
     parser.add_argument("--top-p", type=float, default=0.95, help="Top-p (python backend only).")
     parser.add_argument("--seed", type=int, help="Random seed (python backend only).")
+    parser.add_argument("--grammar-file", type=Path, help="Path to a GBNF grammar file (CLI backend).")
+    parser.add_argument(
+        "--stop",
+        action="append",
+        default=[],
+        help="Add a stop sequence for generation (CLI backend). Repeatable.",
+    )
     return parser
 
 
@@ -162,6 +169,17 @@ def cli_backend(args: argparse.Namespace, llama_dir: Path, model_path: Path, thr
 
     predict_limit = args.n_predict if args.n_predict is not None else max(1, args.ctx_size - 1)
     cmd.extend(["--n-predict", str(predict_limit)])
+
+    # Map select sampling/options for CLI backend when provided.
+    if args.temperature is not None:
+        cmd.extend(["--temp", str(args.temperature)])
+    if args.top_p is not None:
+        cmd.extend(["--top-p", str(args.top_p)])
+    if args.grammar_file:
+        cmd.extend(["--grammar-file", str(args.grammar_file)])
+    if args.stop:
+        for stop_token in args.stop:
+            cmd.extend(["--stop", stop_token])
 
     if args.extra_args:
         cmd.append("--")
