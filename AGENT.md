@@ -170,7 +170,7 @@ srun --partition=core --cpus-per-task=1 --mem=2G --time=00:05:00 \
     --limit 10 --country us --category technology
 ```
 
-The script calls `https://newsapi.org/v2/top-headlines` using your `NEWS_API_KEY`, prints a two-line summary for the next unseen article, and skips anything already logged in `/projects/genomic-ml/da2343/x_agent/cache/news_posted.json`. Override the cache path with `NEWS_POSTED_CACHE=/path/foo.json`, clear history via `--reset-cache`, and combine filters such as `--sources wired` or `--query AI` as needed. Because it makes an external HTTP request, launch it from a compute node (`srun` or an interactive session). Respect NewsAPI rate limits if you automate polling.
+The script calls `https://newsapi.org/v2/top-headlines` using your `NEWS_API_KEY`, prints a two-line summary for the next unseen article, and skips anything already logged in `/projects/genomic-ml/da2343/x_agent/cache/news_posted.json`. Override the cache path with `NEWS_POSTED_CACHE=/path/foo.json`, clear history via `--reset-cache`, and stick to the supported `--category` options of `sports` or `technology`. Because it makes an external HTTP request, launch it from a compute node (`srun` or an interactive session). Respect NewsAPI rate limits if you automate polling.
 
 ### 12. Full News summarizer (`scripts/news_summarize.py`)
 
@@ -179,7 +179,7 @@ For an end-to-end workflow that fetches a fresh NewsAPI headline, retrieves the 
 ```bash
 srun --partition=core --cpus-per-task=16 --mem=20G --time=00:30:00 \
   python /projects/genomic-ml/da2343/x_agent/scripts/news_summarize.py \
-    --limit 15 --country us --category business
+    --limit 15 --country us --category sports
 ```
 
 This script shares the same cache (so you don’t repeat articles), downloads article content via `trafilatura`, and calls `run_cpu_llm.py` to generate a ≤240 character social-style blurb. Ensure `trafilatura` is installed in the `llama-cpu` environment (`pip install trafilatura`) and run it from a compute node. Use `--dry-run` to skip summarization during testing or `--reset-cache` to start over from a clean slate. Enable `--tweet` if you want to post the generated summary to Twitter with the stored credentials.

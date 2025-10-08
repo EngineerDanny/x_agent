@@ -33,7 +33,7 @@ DEFAULT_CACHE = pathlib.Path("/projects/genomic-ml/da2343/x_agent/cache/news_see
 
 NEWS_PROMPT_TEMPLATE = textwrap.dedent(
     """
-    Write a tweet-style reaction to the article below in one or two sentences (about 40 to 60 words). Make it conversational, highlight the key takeaway, and briefly note why it matters or what could happen next. You may include one relevant hashtag or mention, but do not include any raw URLs. Respond with only the tweet text.
+    Write a tweet-style reaction to the article below in one or two sentences (about 200 characters). Make it conversational, highlight the key takeaway, and briefly note why it matters or what could happen next. You may include one relevant hashtag or mention, but do not include any raw URLs. Respond with only the tweet text.
 
     Headline: {title}
     URL: {url}
@@ -49,6 +49,7 @@ SUMMARY_TOKENS = 160
 ARTICLE_CHAR_LIMIT = 2000
 TWEET_CACHE = pathlib.Path("/projects/genomic-ml/da2343/x_agent/cache/news_tweets.json")
 MIN_SUMMARY_LENGTH = 10
+MAX_TWEET_LENGTH = 200
 
 
 def _load_tweeted(cache_path: pathlib.Path) -> set[str]:
@@ -97,15 +98,22 @@ def tweet_summary(summary: str, seen: set[str]) -> set[str]:
     )
 
     tweet_text = summary.strip()
-    response = client.create_tweet(text=tweet_text)
-    tweet_id = response.data.get("id")
-    if tweet_id:
-        print(f"Tweet posted: https://twitter.com/i/web/status/{tweet_id}")
-    else:
-        print("Tweet posted.", file=sys.stderr)
+    
+    print(f"\nTweeting ({len(tweet_text)} chars):")
+    print(tweet_text)
+    return False
 
-    seen.add(unique_id)
-    _save_tweeted(TWEET_CACHE, seen)
+    try:
+        response = client.create_tweet(text=tweet_text)
+        tweet_id = response.data.get("id")
+        if tweet_id:
+            print(f"Tweet posted: https://twitter.com/i/web/status/{tweet_id}")
+        else:
+            print("Tweet posted.", file=sys.stderr)
+        seen.add(unique_id)
+        _save_tweeted(TWEET_CACHE, seen)
+    except tweepy.TweepyException as exc:
+        print(f"Tweet failed ({exc.__class__.__name__}): {exc}", file=sys.stderr)
     return seen
 
 
@@ -127,8 +135,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--category",
         type=str,
+        choices=("sports", "technology"),
         default=None,
-        help="Optional NewsAPI category filter (business, entertainment, health, science, sports, technology)",
+        help="Optional NewsAPI category filter (sports or technology)",
     )
     parser.add_argument(
         "--cache",
