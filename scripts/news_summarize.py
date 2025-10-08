@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -33,7 +34,14 @@ DEFAULT_CACHE = pathlib.Path("/projects/genomic-ml/da2343/x_agent/cache/news_see
 
 NEWS_PROMPT_TEMPLATE = textwrap.dedent(
     """
-    Write a tweet-style reaction to the article below in one or two sentences (about 200 characters). Make it conversational, highlight the key takeaway, and briefly note why it matters or what could happen next. You may include one relevant hashtag or mention, but do not include any raw URLs. Respond with only the tweet text.
+    You are a JSON-only assistant. Return a single JSON object on one line with exactly the keys "summary" and "tweet".
+    Format strictly as:
+    {{"summary": "...", "tweet": "..."}}
+
+    Requirements:
+    - summary: one short paragraph (<=320 characters) recapping the article.
+    - tweet: conversational (<=200 characters), include exactly one relevant hashtag or mention, no raw URLs.
+    - Do NOT include any extra text, commentary, explanations, or Markdown outside the JSON braces.
 
     Headline: {title}
     URL: {url}
@@ -49,7 +57,47 @@ SUMMARY_TOKENS = 160
 ARTICLE_CHAR_LIMIT = 2000
 TWEET_CACHE = pathlib.Path("/projects/genomic-ml/da2343/x_agent/cache/news_tweets.json")
 MIN_SUMMARY_LENGTH = 10
+MAX_SUMMARY_LENGTH = 320
 MAX_TWEET_LENGTH = 200
+
+
+def _parse_model_output(raw_text: str) -> tuple[str, str]:
+    """Parse the LLM response, which should be a JSON object with summary/tweet."""
+    raw_text = raw_text.strip()
+    if not raw_text:
+        raise ValueError("Empty model response")
+
+    if not raw_text.lstrip().startswith("{"):
+        start = raw_text.find("{")
+        end = raw_text.rfind("}")
+        if start != -1 and end != -1 and start < end:
+            raw_text = raw_text[start : end + 1]
+
+    try:
+        data = json.loads(raw_text)
+        if not isinstance(data, dict):
+            raise ValueError("Expected a JSON object")
+    except json.JSONDecodeError as exc:
+        preview = raw_text[:400].replace("\n", "\\n")
+        summary_match = re.search(r'"summary"\s*:\s*"(.*?)"', raw_text, flags=re.DOTALL)
+        tweet_match = re.search(r'"tweet"\s*:\s*"(.*?)"', raw_text, flags=re.DOTALL)
+        if summary_match and tweet_match:
+            summary = summary_match.group(1).strip()
+            tweet = tweet_match.group(1).strip()
+            summary = summary.replace('\\"', '"')
+            tweet = tweet.replace('\\"', '"')
+            return summary, tweet
+        raise ValueError(f"Model response was not valid JSON: {exc}; preview={preview!r}")
+
+    summary = (data.get("summary") or "").strip()
+    tweet = (data.get("tweet") or "").strip()
+
+    if not summary:
+        raise ValueError("JSON payload missing non-empty 'summary' field")
+    if not tweet:
+        raise ValueError("JSON payload missing non-empty 'tweet' field")
+
+    return summary, tweet
 
 
 def _load_tweeted(cache_path: pathlib.Path) -> set[str]:
@@ -70,9 +118,10 @@ def _fingerprint_summary(summary: str) -> str:
     return hashlib.sha256(summary.strip().encode("utf-8")).hexdigest()
 
 
-def tweet_summary(summary: str, seen: set[str]) -> set[str]:
-    """Post summary text to Twitter if we haven't published it yet."""
-    unique_id = _fingerprint_summary(summary)
+def tweet_summary(tweet_text: str, seen: set[str]) -> set[str]:
+    """Post tweet text to Twitter if we haven't published it yet."""
+    tweet_text = tweet_text.strip()
+    unique_id = _fingerprint_summary(tweet_text)
     if unique_id in seen:
         print("Summary already tweeted; skipping.", file=sys.stderr)
         return seen
@@ -96,12 +145,6 @@ def tweet_summary(summary: str, seen: set[str]) -> set[str]:
         access_token=os.environ["TWITTER_ACCESS_TOKEN"],
         access_token_secret=os.environ["TWITTER_ACCESS_SECRET"],
     )
-
-    tweet_text = summary.strip()
-    
-    print(f"\nTweeting ({len(tweet_text)} chars):")
-    print(tweet_text)
-    return False
 
     try:
         response = client.create_tweet(text=tweet_text)
@@ -291,25 +334,43 @@ def main(argv: List[str]) -> int:
             excerpt=article_text,
         )
         raw_summary = summarize_with_llm(args.model, args.threads, prompt)
-        summary = raw_summary.strip()
+        try:
+            summary, tweet_text = _parse_model_output(raw_summary)
+        except ValueError as exc:
+            print(f"Skipping: model output invalid ({exc}).", file=sys.stderr)
+            seen_ids.add(unique_key)
+            continue
 
         if len(summary) < MIN_SUMMARY_LENGTH:
             print("Skipping: summary is too short to be informative.", file=sys.stderr)
             seen_ids.add(unique_key)
             continue
 
-        summary_token = _fingerprint_summary(summary)
-        if summary_token in tweeted_ids:
+        if len(summary) > MAX_SUMMARY_LENGTH:
+            summary = summary[:MAX_SUMMARY_LENGTH].rstrip()
+
+        if len(tweet_text) > MAX_TWEET_LENGTH:
+            print(
+                f"Skipping: tweet text exceeds {MAX_TWEET_LENGTH} characters (got {len(tweet_text)}).",
+                file=sys.stderr,
+            )
+            seen_ids.add(unique_key)
+            continue
+
+        tweet_hash = _fingerprint_summary(tweet_text)
+        if tweet_hash in tweeted_ids:
             print("Skipping: summary text already used in a previous tweet.", file=sys.stderr)
             seen_ids.add(unique_key)
             continue
 
         print("\nSummary:")
         print(summary)
+        print("\nTweet preview:")
+        print(tweet_text)
         if args.tweet:
-            tweeted_ids = tweet_summary(summary, tweeted_ids)
+            tweeted_ids = tweet_summary(tweet_text, tweeted_ids)
         elif not args.dry_run:
-            tweeted_ids.add(summary_token)
+            tweeted_ids.add(tweet_hash)
             _save_tweeted(TWEET_CACHE, tweeted_ids)
 
         seen_ids.add(unique_key)
