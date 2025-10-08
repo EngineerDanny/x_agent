@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""
-Fetch Hacker News front-page stories, filter out entries that were already
-posted, and print a short status line for the next unseen candidate.
-
-Usage:
-  python scripts/fetch_hn_top.py [--limit 5] [--score-min 300]
-
-State is tracked in ~/.cache/hackernews_posted.json by default; override with
-HN_POSTED_CACHE env var if you want per-project separation.
-"""
+"""Hacker News helper: fetch front-page stories and emit the next unseen item."""
 
 from __future__ import annotations
 
@@ -41,13 +32,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         "--cache",
         type=pathlib.Path,
         default=pathlib.Path(os.environ.get(CACHE_ENV, DEFAULT_CACHE)),
-        help="Path to posted-id cache (default: ~/.cache/hackernews_posted.json)",
+        help="Path to posted-id cache",
     )
-    parser.add_argument(
-        "--reset-cache",
-        action="store_true",
-        help="Ignore and clear the existing cache before running",
-    )
+    parser.add_argument("--reset-cache", action="store_true", help="Clear existing cache before processing")
     return parser.parse_args(argv)
 
 
@@ -74,8 +61,7 @@ def fetch_front_page(limit: int) -> List[dict]:
     url = API_URL.format(limit=limit)
     with urllib.request.urlopen(url, timeout=10) as resp:
         data = json.load(resp)
-    hits = data.get("hits") or []
-    return hits
+    return data.get("hits") or []
 
 
 def format_story(hit: dict) -> tuple[str, str]:
@@ -90,8 +76,20 @@ def format_story(hit: dict) -> tuple[str, str]:
     if author:
         summary_parts.append(f"by {author}")
 
-    summary = " — ".join(summary_parts)
-    return summary, url
+    return " — ".join(summary_parts), url
+
+
+def select_story(hits: List[dict], cached_ids: set[str], score_min: int) -> tuple[dict | None, set[str]]:
+    updated_cache = set(cached_ids)
+    for hit in hits:
+        object_id = str(hit.get("objectID"))
+        if score_min and (hit.get("points") or 0) < score_min:
+            continue
+        if object_id in cached_ids:
+            continue
+        updated_cache.add(object_id)
+        return hit, updated_cache
+    return None, updated_cache
 
 
 def main(argv: List[str]) -> int:
@@ -103,25 +101,17 @@ def main(argv: List[str]) -> int:
         return 1
 
     cached_ids = load_cache(args.cache, args.reset_cache)
-    new_cache = set(cached_ids)
+    hit, updated_cache = select_story(hits, cached_ids, args.score_min)
+    save_cache(args.cache, updated_cache)
 
-    for hit in hits:
-        object_id = str(hit.get("objectID"))
-        if args.score_min and (hit.get("points") or 0) < args.score_min:
-            continue
-        if object_id in cached_ids:
-            continue
+    if hit is None:
+        print("No unseen stories met the criteria.", file=sys.stderr)
+        return 1
 
-        summary, url = format_story(hit)
-        print(summary)
-        print(url)
-        new_cache.add(object_id)
-        save_cache(args.cache, new_cache)
-        return 0
-
-    print("No unseen stories met the criteria.", file=sys.stderr)
-    save_cache(args.cache, new_cache)
-    return 1
+    summary, url = format_story(hit)
+    print(summary)
+    print(url)
+    return 0
 
 
 if __name__ == "__main__":

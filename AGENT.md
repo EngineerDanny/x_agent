@@ -177,3 +177,15 @@ The script hits the free Algolia API (`https://hn.algolia.com/api/v1/search?tags
 ```
 
 It maintains a cache of posted story IDs at `/projects/genomic-ml/da2343/x_agent/cache/hn_posted.json` (override with `HN_POSTED_CACHE=/path/foo.json` if you want a different location). Use `--reset-cache` to clear, or tweak `--limit`/`--score-min` per your needs. Because it makes an external HTTP request, always launch it from a compute node (`srun` or inside an existing interactive session). Adjust polling frequency responsibly if you automate it.
+
+### 12. Full HN summarizer (`scripts/hn_summarize.py`)
+
+For an end-to-end workflow that fetches a fresh HN story, grabs the linked article, and summarizes it with the local GGUF model:
+
+```bash
+srun --partition=core --cpus-per-task=16 --mem=20G --time=00:30:00 \
+  python /projects/genomic-ml/da2343/x_agent/scripts/hn_summarize.py \
+    --limit 15 --score-min 200
+```
+
+This script reuses the same cache (so you don’t repeat stories), downloads article content via `trafilatura`, and calls `run_cpu_llm.py` to generate a ≤240 character social-style blurb. Ensure `trafilatura` is installed in the `llama-cpu` environment (`pip install trafilatura`) and run it from a compute node. Add `--dry-run` to skip summarization when testing, or `--reset-cache` to start over.
