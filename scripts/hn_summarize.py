@@ -20,6 +20,7 @@ import tempfile
 from typing import List
 
 import requests
+import trafilatura
 from html import unescape
 from html.parser import HTMLParser
 import re
@@ -37,7 +38,7 @@ from fetch_hn_top import (
 
 HN_PROMPT_TEMPLATE = textwrap.dedent(
     """
-    You are a concise editor. Using the headline and article extract below, write a single-sentence social post of at most 240 characters. Keep it informative, neutral, and do not echo these instructions. Reply with the sentence only.
+    Write one tweet-length update (≤240 characters) about the following headline and article excerpt. Keep it factual, neutral, and end with the URL. Do not mention these instructions.
 
     Headline: {title}
     URL: {url}
@@ -51,7 +52,6 @@ DEFAULT_MODEL = "/projects/genomic-ml/da2343/x_agent/llm/llama.cpp/models/deepse
 DEFAULT_THREADS = 16
 SUMMARY_TOKENS = 160
 ARTICLE_CHAR_LIMIT = 2000
-SUMMARY_MAX_CHARS = 240
 
 
 def _select_summary_line(text: str) -> str:
@@ -139,13 +139,7 @@ def extract_article(url: str) -> str:
         return ""
 
     html = response.text
-    try:
-        import trafilatura
-
-        text = trafilatura.extract(html, url=url) or ""
-    except Exception as exc:  # broad: trafilatura optional
-        print(f"Warning: trafilatura extract failed ({exc}); falling back to raw snippet", file=sys.stderr)
-        text = ""
+    text = trafilatura.extract(html, url=url) or ""
 
     if not text:
         meta_desc = _fallback_meta_description(html)
@@ -220,7 +214,7 @@ def main(argv: List[str]) -> int:
         excerpt=article_text,
     )
     raw_summary = summarize_with_llm(args.model, args.threads, prompt)
-    summary = _truncate_summary(_select_summary_line(raw_summary))
+    summary = _select_summary_line(raw_summary)
     print("\nSummary:")
     print(summary)
     return 0
