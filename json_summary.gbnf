@@ -1,10 +1,9 @@
-# exactly: {"summary":"...","tweet":"..."}
-root         ::= obj ws
-obj          ::= "{" ws "\"summary\"" ws ":" ws jstring ws "," ws "\"tweet\"" ws ":" ws jstring ws "}"
-jstring      ::= "\"" chars "\""
-chars        ::= { char }
-char         ::= unescaped | escape
-unescaped    ::= [^"\\]
-escape       ::= "\\" ( ["\\/bfnrt] | "u" hex hex hex hex )
-hex          ::= [0-9a-fA-F]
-ws           ::= { " " | "\t" | "\r" | "\n" }
+root       ::= object
+object     ::= "{" ws "\"summary\"" ws ":" ws string ws "," ws "\"tweet\"" ws ":" ws string ws "}" ws
+string     ::= "\"" chars "\"" ws
+chars      ::= | char chars
+char       ::= normal | escape
+normal     ::= [^"\\\u0000-\u001F]
+escape     ::= "\\" ( ["\\/bfnrt] | "u" hex hex hex hex )
+hex        ::= [0-9a-fA-F]
+ws         ::= | ws (" " | "\t" | "\r" | "\n")

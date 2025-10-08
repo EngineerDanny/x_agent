@@ -359,10 +359,18 @@ def main(argv: List[str]) -> int:
                 continue
 
         if summary is None or tweet_text is None:
-            message = f"model output invalid ({last_error})" if last_error else "failed to produce summary"
-            print(f"Skipping: {message}.", file=sys.stderr)
-            processed_ids.add(unique_key)
-            continue
+            fallback_summary = textwrap.shorten(article_text or summary_line, width=MAX_SUMMARY_LENGTH, placeholder="")
+            if len(fallback_summary) < MIN_SUMMARY_LENGTH:
+                fallback_summary = (summary_line or title)[:MAX_SUMMARY_LENGTH].strip() or title
+            fallback_tweet = textwrap.shorten(fallback_summary, width=MAX_TWEET_LENGTH, placeholder="")
+            if not fallback_tweet:
+                fallback_tweet = textwrap.shorten(title, width=MAX_TWEET_LENGTH, placeholder="")
+            if "#" not in fallback_tweet:
+                hashtagged = f"{fallback_tweet} #news".strip()
+                fallback_tweet = textwrap.shorten(hashtagged, width=MAX_TWEET_LENGTH, placeholder="")
+            if not fallback_tweet:
+                fallback_tweet = "Breaking news update #news"
+            summary, tweet_text = fallback_summary, fallback_tweet
 
         if len(summary) < MIN_SUMMARY_LENGTH:
             summary = textwrap.shorten(article_text, width=MAX_SUMMARY_LENGTH, placeholder="")
