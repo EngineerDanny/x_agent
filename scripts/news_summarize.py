@@ -3,7 +3,7 @@
 
 1. Fetch the current top headlines from NewsAPI.org.
 2. Pick the first unseen story that matches the provided filters.
-3. Fetch the linked article and extract readable text (using trafilatura if available).
+3. Use the NewsAPI description as the article excerpt.
 4. Ask the local GGUF model (via run_cpu_llm.py) for a ≤240-char summary.
 5. Print the formatted result and update the cache.
 """
@@ -33,7 +33,7 @@ DEFAULT_CACHE = pathlib.Path("/projects/genomic-ml/da2343/x_agent/cache/news_see
 
 NEWS_PROMPT_TEMPLATE = textwrap.dedent(
     """
-    Write a tweet-style reaction to the article below in one or two sentences (about 40–60 words). Make it conversational, highlight the key takeaway, and briefly note why it matters or what could happen next. You may include one relevant hashtag or mention, and you can append the URL once at the end if it adds value. Do not repeat these instructions.
+    Write a tweet-style reaction to the article below in one or two sentences (about 40 to 60 words). Make it conversational, highlight the key takeaway, and briefly note why it matters or what could happen next. You may include one relevant hashtag or mention, but do not include any raw URLs. Respond with only the tweet text.
 
     Headline: {title}
     URL: {url}
@@ -65,13 +65,16 @@ def _save_tweeted(cache_path: pathlib.Path, ids: set[str]) -> None:
     cache_path.write_text(json.dumps(sorted(ids)), encoding="utf-8")
 
 
-def tweet_summary(summary: str, url: str, force: bool = False) -> None:
+def _fingerprint_summary(summary: str) -> str:
+    return hashlib.sha256(summary.strip().encode("utf-8")).hexdigest()
+
+
+def tweet_summary(summary: str, url: str, seen: set[str], force: bool = False) -> set[str]:
     """Post summary+URL to Twitter if not already shared."""
-    unique_id = hashlib.sha256(f"{summary}|{url}".encode("utf-8")).hexdigest()
-    seen = _load_tweeted(TWEET_CACHE)
+    unique_id = _fingerprint_summary(summary)
     if unique_id in seen and not force:
         print("Summary already tweeted; skipping (use --tweet-force to override).", file=sys.stderr)
-        return
+        return seen
 
     required_env = [
         "TWITTER_CONSUMER_KEY",
@@ -103,6 +106,7 @@ def tweet_summary(summary: str, url: str, force: bool = False) -> None:
 
     seen.add(unique_id)
     _save_tweeted(TWEET_CACHE, seen)
+    return seen
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
@@ -264,6 +268,7 @@ def main(argv: List[str]) -> int:
 
     cached_ids = load_cache(args.cache, args.reset_cache)
     seen_ids = set(cached_ids)
+    tweeted_ids = _load_tweeted(TWEET_CACHE)
 
     for article in articles:
         url = article.get("url")
@@ -282,10 +287,6 @@ def main(argv: List[str]) -> int:
             summary_parts.append(published_at)
         summary_line = " — ".join(part for part in summary_parts if part)
         print(summary_line)
-        if url:
-            print(url)
-        else:
-            print("(No URL provided by NewsAPI response)")
 
         if args.dry_run:
             seen_ids.add(unique_key)
@@ -317,10 +318,19 @@ def main(argv: List[str]) -> int:
             seen_ids.add(unique_key)
             continue
 
+        summary_token = _fingerprint_summary(summary)
+        if summary_token in tweeted_ids and not args.tweet_force:
+            print("Skipping: summary text already used in a previous tweet.", file=sys.stderr)
+            seen_ids.add(unique_key)
+            continue
+
         print("\nSummary:")
         print(summary)
         if args.tweet:
-            tweet_summary(summary, url, force=args.tweet_force)
+            tweeted_ids = tweet_summary(summary, url, tweeted_ids, force=args.tweet_force)
+        elif not args.dry_run:
+            tweeted_ids.add(summary_token)
+            _save_tweeted(TWEET_CACHE, tweeted_ids)
 
         seen_ids.add(unique_key)
         save_cache(args.cache, seen_ids)
