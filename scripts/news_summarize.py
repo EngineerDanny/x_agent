@@ -22,9 +22,7 @@ import textwrap
 from typing import Iterable, List
 
 import requests
-import trafilatura
 import tweepy
-from html import unescape
 from dotenv import load_dotenv
 
 NEWS_API_URL = "https://newsapi.org/v2/top-headlines"
@@ -50,8 +48,7 @@ DEFAULT_THREADS = 16
 SUMMARY_TOKENS = 160
 ARTICLE_CHAR_LIMIT = 2000
 TWEET_CACHE = pathlib.Path("/projects/genomic-ml/da2343/x_agent/cache/news_tweets.json")
-DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; NewsSummaryBot/1.0)"
-MIN_SUMMARY_LENGTH = 20
+MIN_SUMMARY_LENGTH = 10
 
 
 def _load_tweeted(cache_path: pathlib.Path) -> set[str]:
@@ -183,26 +180,6 @@ def save_cache(cache_path: pathlib.Path, ids: Iterable[str]) -> None:
     cache_path.write_text(json.dumps(sorted(set(ids))), encoding="utf-8")
 
 
-def extract_article(url: str) -> str:
-    """Return readable text from the article URL."""
-    headers = {"User-Agent": DEFAULT_USER_AGENT}
-    try:
-        response = requests.get(url, timeout=15, headers=headers)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        print(f"Warning: failed to fetch article ({exc})", file=sys.stderr)
-        return ""
-
-    html = response.text
-    text = trafilatura.extract(html, url=url) or ""
-
-    if text:
-        return textwrap.shorten(text.strip(), width=ARTICLE_CHAR_LIMIT, placeholder="")
-
-    snippet = unescape(" ".join(html.split()))
-    return snippet[:ARTICLE_CHAR_LIMIT]
-
-
 def fetch_top_headlines(
     api_key: str,
     limit: int,
@@ -320,11 +297,12 @@ def main(argv: List[str]) -> int:
             seen_ids.add(unique_key)
             continue
 
-        article_text = extract_article(url)
+        article_text = article.get("description") or ""
         if not article_text:
-            print("Skipping: unable to extract article content.", file=sys.stderr)
+            print("Skipping: article lacks a usable description.", file=sys.stderr)
             seen_ids.add(unique_key)
             continue
+        article_text = textwrap.shorten(article_text.strip(), width=ARTICLE_CHAR_LIMIT, placeholder="")
 
         prompt = NEWS_PROMPT_TEMPLATE.format(
             title=title,
