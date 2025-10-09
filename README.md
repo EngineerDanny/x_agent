@@ -21,11 +21,11 @@ Automates twice-daily summaries of top headlines from NewsAPI.org using a local 
 
 ## Setup
 
-1. **Clone / copy the repo** onto the cluster under `/projects/genomic-ml/da2343/x_agent` (paths are baked into scripts; adjust if you relocate).
+1. **Clone / copy the repo** onto the cluster under `<repo-root>` (paths are baked into scripts; adjust if you relocate).
 2. **Activate environment**:
    ```bash
-   cd /projects/genomic-ml/da2343/x_agent
-   source /packages/anaconda3/2024.02/etc/profile.d/conda.sh
+   cd <repo-root>
+   source <anaconda-root>/etc/profile.d/conda.sh
    conda activate llama-cpu
    ```
 3. **Install dependencies** (if missing):
@@ -41,10 +41,10 @@ Automates twice-daily summaries of top headlines from NewsAPI.org using a local 
    The repo uses `llama-cli` from `build/bin/`.
 5. **Download a GGUF model** (default: Llama 3.1 8B Instruct Q4_K_M):
    ```bash
-   mkdir -p /projects/genomic-ml/da2343/x_agent/llm/llama.cpp/models/llama3_8b_instruct
+   mkdir -p <repo-root>/llm/llama.cpp/models/llama3_8b_instruct
    huggingface-cli download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF \
      Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf \
-     --local-dir /projects/genomic-ml/da2343/x_agent/llm/llama.cpp/models/llama3_8b_instruct
+     --local-dir <repo-root>/llm/llama.cpp/models/llama3_8b_instruct
    ```
    Update `DEFAULT_MODEL` in `scripts/news_summarize.py` if you switch checkpoints (e.g., Qwen 2.5 14B later).
 6. **Configure environment variables**: create or edit `.env` with at least:
@@ -60,8 +60,8 @@ Automates twice-daily summaries of top headlines from NewsAPI.org using a local 
 ## Running Manually
 
 ```bash
-cd /projects/genomic-ml/da2343/x_agent
-./llama-cpu/bin/python scripts/news_summarize.py \
+cd <repo-root>
+<repo-root>/llama-cpu/bin/python scripts/news_summarize.py \
   --limit 50 --country us --category technology --dry-run
 ```
 
@@ -75,15 +75,15 @@ cd /projects/genomic-ml/da2343/x_agent
    ```bash
    ./scripts/submit_news_summary.sh
    squeue -u "$USER"   # optional monitor
-   tail -n 40 logs/news_<jobid>.out
+   tail -n 40 <repo-root>/logs/news_<jobid>.out
    ```
    Logs land in `logs/news_<jobid>.out|err`. The tweet cache at `cache/news_tweets.json` prevents duplicates.
 
 2. **Schedule twice daily**:
    - Edit crontab (`EDITOR=nano crontab -e`) and add:
      ```
-     5 9,17 * * * /projects/genomic-ml/da2343/x_agent/scripts/submit_news_summary.sh \
-       >/projects/genomic-ml/da2343/x_agent/logs/cron_submit.log 2>&1
+     5 9,17 * * * <repo-root>/scripts/submit_news_summary.sh \
+       ><repo-root>/logs/cron_submit.log 2>&1
      ```
    - Cron runs on the login node and invokes the Slurm job at 09:05 and 17:05.
    - Review `logs/cron_submit.log` plus the usual job logs for output.
@@ -94,7 +94,7 @@ cd /projects/genomic-ml/da2343/x_agent
 - **Model prompt**: `NEWS_PROMPT_TEMPLATE` and `NEWS_PROMPT_RETRY_TEMPLATE` define the JSON instructions and retry message.
 - **Fallback behavior**: After two failed JSON attempts the script synthesizes summary/tweet text from the article excerpt/title (ensures length and hashtag).
 - **Tweet posting**: Remove the debug `return False` block in `tweet_summary` to actually call Tweepy’s `create_tweet`.
-- **Logging**: tweak output paths in `scripts/run_news_summary.sbatch` (`logs/news_%j.out|err`).
+- **Logging**: tweak output paths in `scripts/run_news_summary.sbatch` (`<repo-root>/logs/news_%j.out|err`).
 
 ## Debugging Tips
 
