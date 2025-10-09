@@ -23,3 +23,5 @@ llm/llama.cpp/models/*
 
 # Environment variables file
 .env
+*.out
+*.err
