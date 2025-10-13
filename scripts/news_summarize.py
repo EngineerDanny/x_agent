@@ -163,7 +163,11 @@ def tweet_summary(tweet_text: str, seen: set[str]) -> set[str]:
     
     ## DEBUGGING: Print tweet text to stderr before posting
     print(f"DEBUG: Tweet text to be posted:\n{tweet_text}\n")
-    return False  # Skip actual tweeting for debugging purposes
+    
+    # check if the tweet_text is not empty and not just whitespace
+    if not tweet_text or tweet_text.isspace():
+        print("DEBUG: Tweet text is empty or whitespace. Skipping tweet.")
+        return seen
 
     try:
         response = client.create_tweet(text=tweet_text)
