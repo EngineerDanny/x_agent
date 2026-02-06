@@ -25,3 +25,4 @@ llm/llama.cpp/models/*
 .env
 *.out
 *.err
+cache/news_tweets.json
